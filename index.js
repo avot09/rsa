@@ -1,42 +1,45 @@
 import express from 'express';
-import multer from 'multer';
+import Busboy from 'busboy';
+import forge from 'node-forge';
 import https from 'https';
 import fs from 'fs';
-import crypto from 'crypto';
 
 const app = express();
-const upload = multer(); // Для парсинга multipart/form-data без сохранения на диск (в память)
-
-// HTTPS опs
-const httpsOptions = {
-  key: fs.readFileSync('key.pem'),  // Ваш приватный ключ сервера
-  cert: fs.readFileSync('cert.pem') // Ваш сертификат сервера
-};
 
 // Маршрут /decypher
-app.post('/decypher', upload.fields([{ name: 'key', maxCount: 1 }, { name: 'secret', maxCount: 1 }]), (req, res) => {
-  try {
-    if (!req.files || !req.files.key || !req.files.secret) {
-      return res.status(400).send('Missing files: need key and secret');
+app.post('/decypher', (req, res) => {
+  const busboy = new Busboy({ headers: req.headers });
+  let privateKeyPem = '';
+  let encryptedBuffer = Buffer.alloc(0);
+
+  busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
+    const chunks = [];
+    file.on('data', (data) => chunks.push(data));
+    file.on('end', () => {
+      const fileData = Buffer.concat(chunks);
+      if (fieldname === 'key') {
+        privateKeyPem = fileData.toString('utf8');
+      } else if (fieldname === 'secret') {
+        encryptedBuffer = fileData;
+      }
+    });
+  });
+
+  busboy.on('finish', () => {
+    try {
+      if (!privateKeyPem || !encryptedBuffer.length) {
+        return res.status(400).send('Missing key or secret');
+      }
+      const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+      const decrypted = privateKey.decrypt(encryptedBuffer.toString('binary'), 'RSA-OAEP');
+      res.send(decrypted.trim());
+    } catch (err) {
+      console.error('Decryption error:', err);
+      res.status(400).send('Ошибка расшифровки: ' + err.message);
     }
+  });
 
-    const privateKeyPem = req.files.key[0].buffer.toString('utf8'); // Приватный ключ как строка PEM
-    const encryptedBuffer = req.files.secret[0].buffer; // Зашифрованные данные как буфер
-
-    // Расшифровка RSA (PKCS1 padding, стандарт для id_rsa)
-    const decrypted = crypto.privateDecrypt(
-      {
-        key: privateKeyPem,
-        padding: crypto.constants.RSA_PKCS1_PADDING
-      },
-      encryptedBuffer
-    );
-
-    res.send(decrypted.toString('utf8').trim()); // Возвращаем как обычную строку
-  } catch (error) {
-    console.error(error);
-    res.status(500).send('Decryption failed: ' + error.message);
-  }
+  req.pipe(busboy);
 });
 
 // Маршрут /login
@@ -44,8 +47,20 @@ app.get('/login', (req, res) => {
   res.send('viktoriya_09');
 });
 
-// Запуск HTTPS сервера (порт из env или 3000, как в форме 3001 — измените при нужно)
+// HTTPS сервер (для локальной разработки, на Render.com HTTPS автоматический)
 const PORT = process.env.PORT || 3000;
-https.createServer(httpsOptions, app).listen(PORT, () => {
-  console.log(`Server running on https://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  // Локально используем самоподписанный сертификат
+  const httpsOptions = {
+    key: fs.readFileSync('key.pem'),
+    cert: fs.readFileSync('cert.pem')
+  };
+  https.createServer(httpsOptions, app).listen(PORT, () => {
+    console.log(`Server running on https://localhost:${PORT}`);
+  });
+} else {
+  // На Render.com используем HTTP, так как SSL обрабатывается Render
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
