@@ -8,7 +8,7 @@ app.post('/decypher', (req, res) => {
   const busboy = new Busboy({ headers: req.headers });
 
   let privateKeyPem = '';
-  let encryptedData = '';
+  let encryptedBuffer = Buffer.alloc(0);
 
   busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
     const chunks = [];
@@ -18,36 +18,33 @@ app.post('/decypher', (req, res) => {
     });
 
     file.on('end', () => {
-      const fileData = Buffer.concat(chunks).toString('utf8');
+      const fileData = Buffer.concat(chunks);
 
       if (fieldname === 'key') {
-        privateKeyPem = fileData;
+        privateKeyPem = fileData.toString();
       } else if (fieldname === 'secret') {
-        encryptedData = fileData.trim();
+        encryptedBuffer = fileData;
       }
     });
   });
 
   busboy.on('finish', () => {
     try {
-      if (!privateKeyPem || !encryptedData) {
+      // Проверяем, что оба файла получены
+      if (!privateKeyPem || encryptedBuffer.length === 0) {
         return res.status(400).send('Missing key or secret files');
       }
 
       const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
       
-      // Декодируем из base64
-      const binaryData = forge.util.decode64(encryptedData);
-      
+      // Пробуем разные методы расшифровки
       let decrypted;
       try {
-        // Пробуем RSA-OAEP
-        decrypted = privateKey.decrypt(binaryData, 'RSA-OAEP', {
-          md: forge.md.sha256.create()
-        });
+        // Сначала пробуем RSA-OAEP
+        decrypted = privateKey.decrypt(encryptedBuffer.toString('binary'), 'RSA-OAEP');
       } catch (e) {
-        // Пробуем RSAES-PKCS1-V1_5
-        decrypted = privateKey.decrypt(binaryData, 'RSAES-PKCS1-V1_5');
+        // Если не сработало, пробуем RSAES-PKCS1-V1_5
+        decrypted = privateKey.decrypt(encryptedBuffer.toString('binary'), 'RSAES-PKCS1-V1_5');
       }
       
       res.setHeader('Content-Type', 'text/plain');
@@ -64,7 +61,7 @@ app.post('/decypher', (req, res) => {
 
 app.get('/login', (req, res) => {
   res.setHeader('Content-Type', 'text/plain');
-  res.send('viktoriya_09');
+  res.send('viktoriya_09'); // Ваш логин
 });
 
 app.get('/', (req, res) => {
