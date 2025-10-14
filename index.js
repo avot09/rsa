@@ -3,7 +3,10 @@ import multer from 'multer';
 import crypto from 'crypto';
 
 const app = express();
-const upload = multer();
+
+// Настройка multer для обработки файлов в памяти
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
@@ -11,6 +14,7 @@ app.use(express.json());
 
 // Endpoint 1: /login
 app.get('/login', (req, res) => {
+    res.setHeader('Content-Type', 'text/plain');
     res.send('viktoriya_09');
 });
 
@@ -32,13 +36,14 @@ app.post('/decypher', upload.fields([
         const privateKey = keyFile.buffer.toString();
         const encryptedData = secretFile.buffer.toString();
 
-        console.log('Private key length:', privateKey.length);
-        console.log('Encrypted data length:', encryptedData.length);
+        console.log('Private key received');
+        console.log('Encrypted data received');
 
         // Расшифровываем данные
         const decrypted = decryptWithPrivateKey(encryptedData, privateKey);
         
         console.log('Decryption successful');
+        res.setHeader('Content-Type', 'text/plain');
         res.send(decrypted);
 
     } catch (error) {
@@ -49,6 +54,7 @@ app.post('/decypher', upload.fields([
 
 function decryptWithPrivateKey(encryptedData, privateKey) {
     try {
+        // Убедимся, что данные в правильном формате
         const encryptedBuffer = Buffer.from(encryptedData.trim(), 'base64');
         
         const decrypted = crypto.privateDecrypt(
@@ -59,8 +65,9 @@ function decryptWithPrivateKey(encryptedData, privateKey) {
             encryptedBuffer
         );
         
-        return decrypted.toString();
+        return decrypted.toString('utf8');
     } catch (error) {
+        console.error('Decryption failed:', error.message);
         throw new Error(`Failed to decrypt: ${error.message}`);
     }
 }
@@ -74,10 +81,11 @@ app.get('/', (req, res) => {
             <li><a href="/login">/login</a> - returns login</li>
             <li>/decypher - POST endpoint for decryption</li>
         </ul>
+        <p>Server is running!</p>
     `);
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 });
