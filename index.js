@@ -23,32 +23,30 @@ app.post('/decypher', (req, res) => {
       if (fieldname === 'key') {
         privateKeyPem = fileData;
       } else if (fieldname === 'secret') {
-        encryptedData = fileData.trim(); // Важно: убираем лишние пробелы и переносы
+        encryptedData = fileData.trim();
       }
     });
   });
 
   busboy.on('finish', () => {
     try {
-      // Проверяем, что оба файла получены
       if (!privateKeyPem || !encryptedData) {
         return res.status(400).send('Missing key or secret files');
       }
 
       const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
       
-      // Конвертируем base64 в бинарные данные
+      // Декодируем из base64
       const binaryData = forge.util.decode64(encryptedData);
       
-      // Пробуем разные методы расшифровки
       let decrypted;
       try {
-        // Сначала пробуем RSA-OAEP
+        // Пробуем RSA-OAEP
         decrypted = privateKey.decrypt(binaryData, 'RSA-OAEP', {
           md: forge.md.sha256.create()
         });
       } catch (e) {
-        // Если не сработало, пробуем RSAES-PKCS1-V1_5
+        // Пробуем RSAES-PKCS1-V1_5
         decrypted = privateKey.decrypt(binaryData, 'RSAES-PKCS1-V1_5');
       }
       
@@ -66,7 +64,7 @@ app.post('/decypher', (req, res) => {
 
 app.get('/login', (req, res) => {
   res.setHeader('Content-Type', 'text/plain');
-  res.send('viktoriya_09'); // Ваш логин
+  res.send('viktoriya_09');
 });
 
 app.get('/', (req, res) => {
@@ -82,5 +80,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Server started on port ${PORT}`);
+  console.log('Server started on port ' + PORT);
 });
