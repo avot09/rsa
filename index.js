@@ -1,159 +1,86 @@
-import express from 'express';
-import multer from 'multer';
-import crypto from 'crypto';
+const express = require('express');
+const Busboy = require('busboy');
+const forge = require('node-forge');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 
-// Middleware
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.post('/decypher', (req, res) => {
+  const busboy = new Busboy({ headers: req.headers });
 
-// Endpoint 1: /login
+  let privateKeyPem = '';
+  let encryptedData = '';
+
+  busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
+    const chunks = [];
+
+    file.on('data', (data) => {
+      chunks.push(data);
+    });
+
+    file.on('end', () => {
+      const fileData = Buffer.concat(chunks).toString('utf8');
+
+      if (fieldname === 'key') {
+        privateKeyPem = fileData;
+      } else if (fieldname === 'secret') {
+        encryptedData = fileData.trim(); // Важно: убираем лишние пробелы и переносы
+      }
+    });
+  });
+
+  busboy.on('finish', () => {
+    try {
+      // Проверяем, что оба файла получены
+      if (!privateKeyPem || !encryptedData) {
+        return res.status(400).send('Missing key or secret files');
+      }
+
+      const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+      
+      // Конвертируем base64 в бинарные данные
+      const binaryData = forge.util.decode64(encryptedData);
+      
+      // Пробуем разные методы расшифровки
+      let decrypted;
+      try {
+        // Сначала пробуем RSA-OAEP
+        decrypted = privateKey.decrypt(binaryData, 'RSA-OAEP', {
+          md: forge.md.sha256.create()
+        });
+      } catch (e) {
+        // Если не сработало, пробуем RSAES-PKCS1-V1_5
+        decrypted = privateKey.decrypt(binaryData, 'RSAES-PKCS1-V1_5');
+      }
+      
+      res.setHeader('Content-Type', 'text/plain');
+      res.send(decrypted);
+      
+    } catch (err) {
+      console.error('Decryption error:', err.message);
+      res.status(500).send('Decryption error: ' + err.message);
+    }
+  });
+
+  req.pipe(busboy);
+});
+
 app.get('/login', (req, res) => {
-    res.setHeader('Content-Type', 'text/plain');
-    res.send('viktoriya_09');
+  res.setHeader('Content-Type', 'text/plain');
+  res.send('viktoriya_09'); // Ваш логин
 });
 
-// Endpoint 2: /decypher
-app.post('/decypher', upload.fields([
-    { name: 'key', maxCount: 1 },
-    { name: 'secret', maxCount: 1 }
-]), (req, res) => {
-    try {
-        console.log('=== DECYPHER REQUEST START ===');
-        
-        if (!req.files || !req.files['key'] || !req.files['secret']) {
-            return res.status(400).send('Missing key or secret files');
-        }
-
-        const keyFile = req.files['key'][0];
-        const secretFile = req.files['secret'][0];
-
-        const privateKey = keyFile.buffer.toString('utf8').trim();
-        let encryptedData = secretFile.buffer.toString('utf8').trim();
-
-        console.log('Private key length:', privateKey.length);
-        console.log('Encrypted data length:', encryptedData.length);
-        console.log('Encrypted data:', encryptedData);
-
-        // Убираем возможные лишние символы
-        encryptedData = encryptedData.replace(/\r\n/g, '').replace(/\n/g, '');
-
-        // Расшифровываем данные
-        const decrypted = decryptWithPrivateKey(encryptedData, privateKey);
-        
-        console.log('Decryption successful:', decrypted);
-        console.log('=== DECYPHER REQUEST END ===');
-        
-        res.setHeader('Content-Type', 'text/plain');
-        res.send(decrypted);
-
-    } catch (error) {
-        console.error('DECRYPTION ERROR:', error.message);
-        res.status(500).send('Decryption error: ' + error.message);
-    }
-});
-
-function decryptWithPrivateKey(encryptedData, privateKey) {
-    try {
-        console.log('Starting decryption...');
-        console.log('Encrypted data type:', typeof encryptedData);
-        console.log('Encrypted data sample:', encryptedData.substring(0, 200));
-
-        // Пробуем разные варианты декодирования
-        let encryptedBuffer;
-        
-        // Вариант 1: Прямое base64 декодирование
-        try {
-            encryptedBuffer = Buffer.from(encryptedData, 'base64');
-            console.log('Base64 decoded buffer length:', encryptedBuffer.length);
-        } catch (e) {
-            console.log('Base64 decoding failed, trying as raw text');
-            encryptedBuffer = Buffer.from(encryptedData, 'utf8');
-        }
-
-        // Если данные все еще слишком маленькие, пробуем hex
-        if (encryptedBuffer.length < 128) {
-            console.log('Buffer too small, trying hex decoding');
-            try {
-                encryptedBuffer = Buffer.from(encryptedData, 'hex');
-                console.log('Hex decoded buffer length:', encryptedBuffer.length);
-            } catch (e) {
-                console.log('Hex decoding also failed');
-            }
-        }
-
-        console.log('Final buffer length:', encryptedBuffer.length);
-
-        // Пробуем разные методы расшифровки
-        let decrypted;
-        
-        try {
-            // Метод 1: PKCS1 padding
-            decrypted = crypto.privateDecrypt(
-                {
-                    key: privateKey,
-                    padding: crypto.constants.RSA_PKCS1_PADDING,
-                },
-                encryptedBuffer
-            );
-        } catch (e) {
-            console.log('PKCS1 failed, trying OAEP:', e.message);
-            
-            // Метод 2: OAEP padding
-            decrypted = crypto.privateDecrypt(
-                {
-                    key: privateKey,
-                    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                },
-                encryptedBuffer
-            );
-        }
-
-        const result = decrypted.toString('utf8');
-        console.log('Decrypted result:', result);
-        
-        return result;
-
-    } catch (error) {
-        console.error('Decryption function error:', error.message);
-        
-        // Дополнительная диагностика
-        if (error.message.includes('too small')) {
-            throw new Error('Encrypted data is too small. Check if data is properly encoded in base64.');
-        } else if (error.message.includes('wrong final block length')) {
-            throw new Error('Wrong block length. Check padding method.');
-        } else {
-            throw new Error(`Decryption failed: ${error.message}`);
-        }
-    }
-}
-
-// Тестовый endpoint для проверки
-app.post('/test-decypher', express.text({ type: '*/*' }), (req, res) => {
-    try {
-        const { key, secret } = JSON.parse(req.body);
-        const decrypted = decryptWithPrivateKey(secret, key);
-        res.send(decrypted);
-    } catch (error) {
-        res.status(500).send('Test error: ' + error.message);
-    }
-});
-
-// Корневой route
 app.get('/', (req, res) => {
-    res.send(`
-        <h1>Decryption Service - DEBUG</h1>
-        <p>Endpoints:</p>
-        <ul>
-            <li><a href="/login">/login</a> - returns login</li>
-            <li>/decypher - POST multipart/form-data</li>
-        </ul>
-    `);
+  res.send(`
+    <h1>Decryption Service</h1>
+    <p>Endpoints:</p>
+    <ul>
+      <li><a href="/login">/login</a> - returns login</li>
+      <li>/decypher - POST multipart/form-data for decryption</li>
+    </ul>
+  `);
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`Server started on port ${PORT}`);
 });
